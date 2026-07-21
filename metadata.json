@@ -1,0 +1,6 @@
+{
+  "name": "Amel Hassi El Bkay",
+  "description": "Plateforme politique, civique et sociale du mouvement citoyen Amel Hassi El Bkay (Kiffa, Mauritanie) dirigé par le Dr. Mahmoud Ould Soueidane.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
