@@ -8,11 +8,15 @@ import React from 'react';
 interface LogoProps {
   className?: string;
   showText?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
 }
 
-export const Logo: React.FC<LogoProps> = ({ className = "w-16 h-16", showText = false }) => {
+export const Logo: React.FC<LogoProps> = ({ className = "w-16 h-16", showText = false, onClick }) => {
   return (
-    <div className={`flex items-center gap-3 ${showText ? 'flex-row' : ''}`}>
+    <div 
+      className={`flex items-center gap-3 ${showText ? 'flex-row' : ''} ${onClick ? 'cursor-pointer' : ''}`}
+      onClick={onClick}
+    >
       <svg
         className={`${className} transition-transform hover:rotate-3 duration-300`}
         viewBox="0 0 400 400"

@@ -4,15 +4,18 @@
  */
 
 import React, { useState, useRef } from 'react';
-import { ChevronLeft, ChevronRight, X, ZoomIn, Image as ImageIcon, Plus, Upload, Trash2, Check, AlertCircle, RotateCw, Pencil } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut, Maximize2, Image as ImageIcon, Plus, Upload, Trash2, Check, AlertCircle, RotateCw, Pencil, Crop } from 'lucide-react';
 import { Language, GalleryItem } from '../types';
 import { TRANSLATIONS, GALLERY_ITEMS } from '../data';
 import { useEditable } from '../context/EditableContext';
+import { ShareButtons } from './ShareButtons';
+import { ImageCropperModal } from './ImageCropperModal';
 
 export const Gallery: React.FC = () => {
   const {
     currentLang,
     t,
+    isAdminMode,
     galleryItems,
     addGalleryItem,
     updateGalleryItem,
@@ -21,6 +24,7 @@ export const Gallery: React.FC = () => {
 
   const [activeFilter, setActiveFilter] = useState<'all' | 'water' | 'political' | 'community'>('all');
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
 
   // Upload Panel states
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -58,7 +62,7 @@ export const Gallery: React.FC = () => {
     return item.category === activeFilter;
   });
 
-  // Client-side image optimization (resizing & compression) to avoid local storage quota exceptions
+  // Client-side image optimization keeping ultra HD clarity (2048x1536 max) and crisp smoothing
   const resizeAndCompressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -68,8 +72,8 @@ export const Gallery: React.FC = () => {
         img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 600;
+          const MAX_WIDTH = 2048;
+          const MAX_HEIGHT = 1536;
           let width = img.width;
           let height = img.height;
 
@@ -85,13 +89,15 @@ export const Gallery: React.FC = () => {
             }
           }
 
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = Math.round(width);
+          canvas.height = Math.round(height);
           const ctx = canvas.getContext('2d');
           if (ctx) {
-            ctx.drawImage(img, 0, 0, width, height);
-            // Convert to a compressed high-quality JPEG
-            resolve(canvas.toDataURL('image/jpeg', 0.85));
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            // Compressed high-definition JPEG at 0.96 quality for crisp rendering
+            resolve(canvas.toDataURL('image/jpeg', 0.96));
           } else {
             resolve(event.target?.result as string);
           }
@@ -112,10 +118,12 @@ export const Gallery: React.FC = () => {
         canvas.height = img.width;
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.translate(canvas.width / 2, canvas.height / 2);
           ctx.rotate((90 * Math.PI) / 180);
           ctx.drawImage(img, -img.width / 2, -img.height / 2);
-          resolve(canvas.toDataURL('image/jpeg', 0.85));
+          resolve(canvas.toDataURL('image/jpeg', 0.96));
         } else {
           resolve(base64Str);
         }
@@ -311,6 +319,7 @@ export const Gallery: React.FC = () => {
     if (lightboxIndex === null) return;
     const newIdx = lightboxIndex === 0 ? filteredItems.length - 1 : lightboxIndex - 1;
     setLightboxIndex(newIdx);
+    setZoomLevel(1);
   };
 
   const handleNext = (e: React.MouseEvent) => {
@@ -318,6 +327,7 @@ export const Gallery: React.FC = () => {
     if (lightboxIndex === null) return;
     const newIdx = lightboxIndex === filteredItems.length - 1 ? 0 : lightboxIndex + 1;
     setLightboxIndex(newIdx);
+    setZoomLevel(1);
   };
 
   return (
@@ -389,20 +399,22 @@ export const Gallery: React.FC = () => {
             </button>
           </div>
 
-          {/* Import / Upload Action Button (Right) */}
-          <div>
-            <button
-              onClick={() => setIsUploadOpen(!isUploadOpen)}
-              className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 dark:from-amber-500 dark:to-amber-600 text-white dark:text-slate-950 font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-md transition-all duration-300"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{currentLang === 'fr' ? "Ajouter vos propres photos" : "إضافة صورك الخاصة"}</span>
-            </button>
-          </div>
+          {/* Import / Upload Action Button (Right - ONLY Admin) */}
+          {isAdminMode && (
+            <div>
+              <button
+                onClick={() => setIsUploadOpen(!isUploadOpen)}
+                className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 dark:from-amber-500 dark:to-amber-600 text-white dark:text-slate-950 font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-md transition-all duration-300"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{currentLang === 'fr' ? "Ajouter vos propres photos" : "إضافة صورك الخاصة"}</span>
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Collapsible Bilingual File Upload Form with Drag-and-Drop */}
-        {isUploadOpen && (
+        {/* Collapsible Bilingual File Upload Form with Drag-and-Drop (ONLY Admin) */}
+        {isAdminMode && isUploadOpen && (
           <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 sm:p-8 mb-12 shadow-inner transition-all duration-300 max-w-4xl mx-auto">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold font-display text-slate-900 dark:text-white">
@@ -642,30 +654,32 @@ export const Gallery: React.FC = () => {
                   />
                 </div>
 
-                {/* Actions overlay for editing, rotating, and deleting any photo */}
-                <div className="absolute top-4 left-4 z-20 flex gap-2" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={(e) => handleRotateItem(item.id, e)}
-                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
-                    title={currentLang === 'fr' ? "Faire pivoter la photo" : "تدوير الصورة"}
-                  >
-                    <RotateCw className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={(e) => startEditItem(item, e)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
-                    title={currentLang === 'fr' ? "Modifier la photo" : "تعديل الصورة"}
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={(e) => deleteItem(item.id, e)}
-                    className="bg-rose-600 hover:bg-rose-700 text-white p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
-                    title={currentLang === 'fr' ? "Supprimer la photo" : "حذف الصورة"}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                {/* Actions overlay for editing, rotating, and deleting any photo (ONLY Admin) */}
+                {isAdminMode && (
+                  <div className="absolute top-4 left-4 z-20 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => handleRotateItem(item.id, e)}
+                      className="bg-amber-500 hover:bg-amber-600 text-slate-950 p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
+                      title={currentLang === 'fr' ? "Faire pivoter la photo" : "تدوير الصورة"}
+                    >
+                      <RotateCw className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => startEditItem(item, e)}
+                      className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
+                      title={currentLang === 'fr' ? "Modifier la photo" : "تعديل الصورة"}
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => deleteItem(item.id, e)}
+                      className="bg-rose-600 hover:bg-rose-700 text-white p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
+                      title={currentLang === 'fr' ? "Supprimer la photo" : "حذف الصورة"}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
 
                 {/* Frosted glass caption drawer sliding up on hover */}
                 <div className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6">
@@ -865,7 +879,7 @@ export const Gallery: React.FC = () => {
           id="gallery-lightbox-overlay"
         >
           {/* Top Header details */}
-          <div className="flex items-center justify-between text-white w-full max-w-7xl mx-auto py-2 border-b border-white/10 relative z-10">
+          <div className="flex flex-wrap items-center justify-between text-white w-full max-w-7xl mx-auto py-2 border-b border-white/10 relative z-10 gap-3">
             <div className="text-left rtl:text-right">
               <span className="text-xs text-amber-400 font-black tracking-widest uppercase">
                 {filteredItems[lightboxIndex].category === 'water' && t.galleryFilterWater}
@@ -876,48 +890,97 @@ export const Gallery: React.FC = () => {
                 {currentLang === 'fr' ? filteredItems[lightboxIndex].title.fr : filteredItems[lightboxIndex].title.ar}
               </h3>
             </div>
+
+            {/* Interactive Zoom Toolbar for High Definition Zooming */}
+            <div className="flex items-center gap-1.5 bg-slate-900/90 border border-white/15 px-3 py-1.5 rounded-2xl shadow-xl">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setZoomLevel(prev => Math.max(prev - 0.5, 0.8));
+                }}
+                disabled={zoomLevel <= 0.8}
+                className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-all disabled:opacity-30"
+                title={currentLang === 'fr' ? "Dézoomer" : "تصغير"}
+              >
+                <ZoomOut className="w-4 h-4" />
+              </button>
+              
+              <span className="text-xs font-mono font-bold text-amber-400 px-1 min-w-[42px] text-center">
+                {Math.round(zoomLevel * 100)}%
+              </span>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setZoomLevel(prev => Math.min(prev + 0.5, 3.5));
+                }}
+                disabled={zoomLevel >= 3.5}
+                className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-all disabled:opacity-30"
+                title={currentLang === 'fr' ? "Zoomer HD" : "تكبير عالي الدقة"}
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+
+              {zoomLevel !== 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setZoomLevel(1);
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all text-[10px] font-bold"
+                  title={currentLang === 'fr' ? "Taille réelle" : "الحجم الأصلي"}
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
             
-            {/* Action buttons (Close + Rotate/Edit/Delete) */}
+            {/* Action buttons (Close + Rotate/Edit/Delete ONLY Admin) */}
             <div className="flex items-center gap-2">
-              <div className="flex gap-2 mr-2 ml-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRotateItem(filteredItems[lightboxIndex].id);
-                  }}
-                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
-                  title={currentLang === 'fr' ? "Faire pivoter" : "تدوير"}
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  <span>{currentLang === 'fr' ? "Pivoter" : "تدوير"}</span>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startEditItem(filteredItems[lightboxIndex], e);
-                  }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
-                  title={currentLang === 'fr' ? "Modifier" : "تعديل"}
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  <span>{currentLang === 'fr' ? "Modifier" : "تعديل"}</span>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteItem(filteredItems[lightboxIndex].id, e);
-                  }}
-                  className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
-                  title={currentLang === 'fr' ? "Supprimer" : "حذف"}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>{currentLang === 'fr' ? "Supprimer" : "حذف"}</span>
-                </button>
-              </div>
+              {isAdminMode && (
+                <div className="flex gap-2 mr-2 ml-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRotateItem(filteredItems[lightboxIndex].id);
+                    }}
+                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
+                    title={currentLang === 'fr' ? "Faire pivoter" : "تدوير"}
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>{currentLang === 'fr' ? "Pivoter" : "تدوير"}</span>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startEditItem(filteredItems[lightboxIndex], e);
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
+                    title={currentLang === 'fr' ? "Modifier" : "تعديل"}
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>{currentLang === 'fr' ? "Modifier" : "تعديل"}</span>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteItem(filteredItems[lightboxIndex].id, e);
+                    }}
+                    className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
+                    title={currentLang === 'fr' ? "Supprimer" : "حذف"}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{currentLang === 'fr' ? "Supprimer" : "حذف"}</span>
+                  </button>
+                </div>
+              )}
               
               {/* Close Overlay btn */}
               <button
-                onClick={() => setLightboxIndex(null)}
+                onClick={() => {
+                  setLightboxIndex(null);
+                  setZoomLevel(1);
+                }}
                 className="bg-white/10 hover:bg-white/20 p-2.5 rounded-full text-white transition-all shadow-md relative z-20"
                 aria-label="Close Lightbox"
               >
@@ -927,26 +990,30 @@ export const Gallery: React.FC = () => {
           </div>
 
           {/* Core Image Display & Arrows */}
-          <div className="flex-1 flex items-center justify-center max-w-5xl mx-auto w-full relative my-6">
+          <div className="flex-1 flex items-center justify-center max-w-6xl mx-auto w-full relative my-4 overflow-hidden">
             {/* Left Button */}
             <button
               onClick={handlePrev}
-              className="absolute left-2 sm:left-4 z-10 bg-black/65 hover:bg-black/90 p-3 rounded-full text-white transition-all border border-white/15"
+              className="absolute left-2 sm:left-4 z-10 bg-black/65 hover:bg-black/90 p-3 rounded-full text-white transition-all border border-white/15 shadow-xl"
               aria-label="Previous Image"
             >
               <ChevronLeft className="w-6 h-6" />
             </button>
 
-            {/* Display Image */}
+            {/* Display Image with Ultra HD Crisp Zoom */}
             <div
-              className="max-h-[65vh] sm:max-h-[75vh] w-full flex justify-center items-center overflow-hidden"
+              className="max-h-[65vh] sm:max-h-[75vh] w-full flex justify-center items-center overflow-auto p-2"
               onClick={(e) => e.stopPropagation()}
             >
               <img
                 src={filteredItems[lightboxIndex].src}
                 alt="Lightbox Full view"
-                className="max-h-full max-w-full object-contain rounded-lg shadow-2xl border border-white/5 transition-transform duration-300"
-                style={{ transform: `rotate(${filteredItems[lightboxIndex].rotation || 0}deg)` }}
+                className="max-h-full max-w-full object-contain rounded-xl shadow-2xl border border-white/10 transition-transform duration-200"
+                style={{ 
+                  transform: `rotate(${filteredItems[lightboxIndex].rotation || 0}deg) scale(${zoomLevel})`,
+                  transformOrigin: 'center center',
+                  imageRendering: 'high-quality'
+                }}
                 referrerPolicy="no-referrer"
               />
             </div>
@@ -954,19 +1021,30 @@ export const Gallery: React.FC = () => {
             {/* Right Button */}
             <button
               onClick={handleNext}
-              className="absolute right-2 sm:right-4 z-10 bg-black/65 hover:bg-black/90 p-3 rounded-full text-white transition-all border border-white/15"
+              className="absolute right-2 sm:right-4 z-10 bg-black/65 hover:bg-black/90 p-3 rounded-full text-white transition-all border border-white/15 shadow-xl"
               aria-label="Next Image"
             >
               <ChevronRight className="w-6 h-6" />
             </button>
           </div>
 
-          {/* Bottom Descriptive Caption Card */}
-          <div className="bg-slate-900/90 border border-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 text-white max-w-3xl mx-auto w-full text-center relative z-10">
+          {/* Bottom Descriptive Caption Card + Share Buttons */}
+          <div className="bg-slate-900/90 border border-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 text-white max-w-3xl mx-auto w-full text-center relative z-10 space-y-4">
             <p className="text-sm text-slate-300 leading-relaxed font-normal">
               {currentLang === 'fr' ? filteredItems[lightboxIndex].description.fr : filteredItems[lightboxIndex].description.ar}
             </p>
-            <div className="text-slate-500 font-bold text-xs mt-3">
+
+            {/* Social Share buttons */}
+            <div className="flex justify-center border-t border-white/10 pt-3">
+              <ShareButtons
+                title={currentLang === 'fr' ? filteredItems[lightboxIndex].title.fr : filteredItems[lightboxIndex].title.ar}
+                description={currentLang === 'fr' ? filteredItems[lightboxIndex].description.fr : filteredItems[lightboxIndex].description.ar}
+                currentLang={currentLang}
+                compact={true}
+              />
+            </div>
+
+            <div className="text-slate-500 font-bold text-xs">
               {`${lightboxIndex + 1} / ${filteredItems.length}`}
             </div>
           </div>

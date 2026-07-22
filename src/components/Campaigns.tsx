@@ -4,15 +4,18 @@
  */
 
 import React, { useState } from 'react';
-import { Calendar, Filter, Droplet, ArrowUpRight, CheckCircle2, AlertCircle, X, Users, MessageSquare, Upload, Trash2, RotateCw, Plus, Check } from 'lucide-react';
+import { Calendar, Filter, Droplet, ArrowUpRight, CheckCircle2, AlertCircle, X, Users, MessageSquare, Upload, Trash2, RotateCw, Plus, Check, Crop } from 'lucide-react';
 import { Language, CampaignItem } from '../types';
 import { TRANSLATIONS, CAMPAIGNS_DATA } from '../data';
 import { useEditable } from '../context/EditableContext';
+import { ShareButtons } from './ShareButtons';
+import { ImageCropperModal } from './ImageCropperModal';
 
 export const Campaigns: React.FC = () => {
   const {
     currentLang,
     t,
+    isAdminMode,
     campaignsData,
     addCampaign,
     updateCampaign,
@@ -22,6 +25,10 @@ export const Campaigns: React.FC = () => {
 
   const [activeFilter, setActiveFilter] = useState<'all' | 'water' | 'political' | 'community'>('all');
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignItem | null>(null);
+
+  // Image Cropping Modal State
+  const [cropperRawSrc, setCropperRawSrc] = useState<string | null>(null);
+  const [cropperTargetCampId, setCropperTargetCampId] = useState<string | null>(null);
 
   // Collapse toggle for custom campaign form
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -73,8 +80,8 @@ export const Campaigns: React.FC = () => {
         img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 600;
+          const MAX_WIDTH = 2048;
+          const MAX_HEIGHT = 1536;
           let width = img.width;
           let height = img.height;
 
@@ -90,12 +97,14 @@ export const Campaigns: React.FC = () => {
             }
           }
 
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = Math.round(width);
+          canvas.height = Math.round(height);
           const ctx = canvas.getContext('2d');
           if (ctx) {
-            ctx.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL('image/jpeg', 0.85));
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.96));
           } else {
             resolve(event.target?.result as string);
           }
@@ -116,10 +125,12 @@ export const Campaigns: React.FC = () => {
         canvas.height = img.width;
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.translate(canvas.width / 2, canvas.height / 2);
           ctx.rotate((90 * Math.PI) / 180);
           ctx.drawImage(img, -img.width / 2, -img.height / 2);
-          resolve(canvas.toDataURL('image/jpeg', 0.85));
+          resolve(canvas.toDataURL('image/jpeg', 0.96));
         } else {
           resolve(base64Str);
         }
@@ -135,19 +146,14 @@ export const Campaigns: React.FC = () => {
         alert(currentLang === 'fr' ? 'Veuillez sélectionner une image valide.' : 'يرجى تحديد صورة صالحة.');
         return;
       }
-      try {
-        const optimized = await resizeAndCompressImage(file);
-        const targetCamp = campaignsData.find(c => c.id === campId);
-        if (targetCamp) {
-          const updated = { ...targetCamp, image: optimized };
-          updateCampaign(campId, updated);
-          if (selectedCampaign && selectedCampaign.id === campId) {
-            setSelectedCampaign(updated);
-          }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setCropperRawSrc(event.target.result as string);
+          setCropperTargetCampId(campId);
         }
-      } catch (err) {
-        alert(currentLang === 'fr' ? 'Erreur de traitement.' : 'حدث خطأ في المعالجة.');
-      }
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -389,20 +395,22 @@ export const Campaigns: React.FC = () => {
             </button>
           </div>
 
-          {/* Add Campaign Action Button */}
-          <div>
-            <button
-              onClick={() => setIsFormOpen(!isFormOpen)}
-              className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 dark:from-amber-500 dark:to-amber-600 text-white dark:text-slate-950 font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-md transition-all duration-300"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{currentLang === 'fr' ? "Ajouter une campagne" : "إضافة حملة جديدة"}</span>
-            </button>
-          </div>
+          {/* Add Campaign Action Button (ONLY Admin) */}
+          {isAdminMode && (
+            <div>
+              <button
+                onClick={() => setIsFormOpen(!isFormOpen)}
+                className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 dark:from-amber-500 dark:to-amber-600 text-white dark:text-slate-950 font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-md transition-all duration-300"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{currentLang === 'fr' ? "Ajouter une campagne" : "إضافة حملة جديدة"}</span>
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Collapsible Bilingual Campaign Form with Drag-and-Drop */}
-        {isFormOpen && (
+        {/* Collapsible Bilingual Campaign Form with Drag-and-Drop (ONLY Admin) */}
+        {isAdminMode && isFormOpen && (
           <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 sm:p-8 mb-12 shadow-md transition-all duration-300 max-w-4xl mx-auto">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold font-display text-slate-900 dark:text-white">
@@ -803,55 +811,57 @@ export const Campaigns: React.FC = () => {
                     referrerPolicy="no-referrer"
                   />
 
-                  {/* Photo Actions Overlays */}
-                  <div className="absolute top-4 right-4 flex gap-2 z-20" onClick={(e) => e.stopPropagation()}>
-                    {/* Upload New Image Input */}
-                    <label 
-                      className="bg-blue-700 hover:bg-blue-800 dark:bg-amber-500 dark:hover:bg-amber-600 text-white dark:text-slate-950 p-2 rounded-full shadow-lg cursor-pointer transition-all hover:scale-110 flex items-center justify-center"
-                      title={currentLang === 'fr' ? "Remplacer l'image" : "تغيير الصورة"}
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleCampaignImageUpload(camp.id, e)}
-                        className="hidden"
-                      />
-                    </label>
-
-                    {/* Rotate Image (only if custom image is active) */}
-                    {(isCustom || hasCustomImage) && (
-                      <button
-                        onClick={(e) => handleCampaignImageRotate(camp.id, e)}
-                        className="bg-amber-500 hover:bg-amber-600 text-slate-950 p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
-                        title={currentLang === 'fr' ? "Pivoter 90°" : "تدوير 90 درجة"}
+                  {/* Photo Actions Overlays (ONLY Admin) */}
+                  {isAdminMode && (
+                    <div className="absolute top-4 right-4 flex gap-2 z-20" onClick={(e) => e.stopPropagation()}>
+                      {/* Upload New Image Input */}
+                      <label 
+                        className="bg-blue-700 hover:bg-blue-800 dark:bg-amber-500 dark:hover:bg-amber-600 text-white dark:text-slate-950 p-2 rounded-full shadow-lg cursor-pointer transition-all hover:scale-110 flex items-center justify-center"
+                        title={currentLang === 'fr' ? "Remplacer l'image" : "تغيير الصورة"}
                       >
-                        <RotateCw className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                        <Upload className="w-3.5 h-3.5" />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleCampaignImageUpload(camp.id, e)}
+                          className="hidden"
+                        />
+                      </label>
 
-                    {/* Reset Image (only if custom image is active for a static campaign) */}
-                    {!isCustom && hasCustomImage && (
-                      <button
-                        onClick={(e) => handleResetCampaignImage(camp.id, e)}
-                        className="bg-rose-600 hover:bg-rose-700 text-white p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
-                        title={currentLang === 'fr' ? "Réinitialiser la photo" : "استعادة الصورة الافتراضية"}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                      {/* Rotate Image (only if custom image is active) */}
+                      {(isCustom || hasCustomImage) && (
+                        <button
+                          onClick={(e) => handleCampaignImageRotate(camp.id, e)}
+                          className="bg-amber-500 hover:bg-amber-600 text-slate-950 p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
+                          title={currentLang === 'fr' ? "Pivoter 90°" : "تدوير 90 درجة"}
+                        >
+                          <RotateCw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
 
-                    {/* Delete Custom Campaign entirely */}
-                    {isCustom && (
-                      <button
-                        onClick={(e) => handleDeleteCustomCampaign(camp.id, e)}
-                        className="bg-rose-600 hover:bg-rose-700 text-white p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
-                        title={currentLang === 'fr' ? "Supprimer la campagne" : "حذف الحملة"}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
+                      {/* Reset Image (only if custom image is active for a static campaign) */}
+                      {!isCustom && hasCustomImage && (
+                        <button
+                          onClick={(e) => handleResetCampaignImage(camp.id, e)}
+                          className="bg-rose-600 hover:bg-rose-700 text-white p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
+                          title={currentLang === 'fr' ? "Réinitialiser la photo" : "استعادة الصورة الافتراضية"}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      {/* Delete Custom Campaign entirely */}
+                      {isCustom && (
+                        <button
+                          onClick={(e) => handleDeleteCustomCampaign(camp.id, e)}
+                          className="bg-rose-600 hover:bg-rose-700 text-white p-2 rounded-full shadow-lg transition-all hover:scale-110 flex items-center justify-center"
+                          title={currentLang === 'fr' ? "Supprimer la campagne" : "حذف الحملة"}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {/* Status Badge */}
                   <div className="absolute top-4 left-4">
@@ -912,14 +922,24 @@ export const Campaigns: React.FC = () => {
                       ))}
                     </div>
 
-                    {/* Trigger Button */}
-                    <button
-                      onClick={() => setSelectedCampaign(camp)}
-                      className="w-full flex items-center justify-center gap-1 bg-slate-50 hover:bg-blue-50 dark:bg-slate-950 dark:hover:bg-amber-950/20 text-slate-700 hover:text-blue-700 dark:text-slate-300 dark:hover:text-amber-400 border border-slate-200 dark:border-slate-800 hover:border-blue-100 dark:hover:border-amber-500/30 py-2.5 rounded-xl text-xs font-bold transition-all duration-300"
-                    >
-                      <span>{t.campaignLearnMore}</span>
-                      <ArrowUpRight className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Trigger Button & Share Actions */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedCampaign(camp)}
+                        className="flex-1 flex items-center justify-center gap-1 bg-slate-50 hover:bg-blue-50 dark:bg-slate-950 dark:hover:bg-amber-950/20 text-slate-700 hover:text-blue-700 dark:text-slate-300 dark:hover:text-amber-400 border border-slate-200 dark:border-slate-800 hover:border-blue-100 dark:hover:border-amber-500/30 py-2.5 rounded-xl text-xs font-bold transition-all duration-300"
+                      >
+                        <span>{t.campaignLearnMore}</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Compact Share buttons */}
+                      <ShareButtons
+                        title={campTitle}
+                        description={campDesc}
+                        currentLang={currentLang}
+                        compact={true}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1055,8 +1075,17 @@ export const Campaigns: React.FC = () => {
                 );
               })()}
 
+              {/* Social Share section inside Modal */}
+              <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800">
+                <ShareButtons
+                  title={currentLang === 'fr' ? selectedCampaign.title.fr : selectedCampaign.title.ar}
+                  description={currentLang === 'fr' ? selectedCampaign.description.fr : selectedCampaign.description.ar}
+                  currentLang={currentLang}
+                />
+              </div>
+
               {/* CTA footer close inside modal */}
-              <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+              <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
                 <button
                   onClick={() => setSelectedCampaign(null)}
                   className="bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
@@ -1070,6 +1099,35 @@ export const Campaigns: React.FC = () => {
         </div>
       )}
 
+      {/* HD Image Cropper Modal for Campaigns */}
+      <ImageCropperModal
+        isOpen={!!cropperRawSrc}
+        imageSrc={cropperRawSrc || ''}
+        currentLang={currentLang}
+        onClose={() => {
+          setCropperRawSrc(null);
+          setCropperTargetCampId(null);
+        }}
+        onCropComplete={(croppedData) => {
+          if (cropperTargetCampId) {
+            const targetCamp = campaignsData.find(c => c.id === cropperTargetCampId);
+            if (targetCamp) {
+              const updated = { ...targetCamp, image: croppedData };
+              updateCampaign(cropperTargetCampId, updated);
+              if (selectedCampaign && selectedCampaign.id === cropperTargetCampId) {
+                setSelectedCampaign(updated);
+              }
+            }
+          } else {
+            // For new campaign form
+            setSelectedFormImage(croppedData);
+          }
+          setCropperRawSrc(null);
+          setCropperTargetCampId(null);
+        }}
+      />
+
     </section>
   );
 };
+

@@ -11,6 +11,11 @@ import {
   timelineEvents,
   faqItems,
   budgetRecords,
+  managersTable,
+  adherentsTable,
+  announcementsTable,
+  interventionPointsTable,
+  siteMetaTable
 } from './src/db/schema.ts';
 import { eq, and } from 'drizzle-orm';
 import { requireAuth } from './src/middleware/auth.ts';
@@ -20,10 +25,66 @@ import { TRANSLATIONS, IMAGES, VALUE_CARDS, CAMPAIGNS_DATA, GALLERY_ITEMS, TIMEL
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   // Body parsing middleware
   app.use(express.json({ limit: '15mb' }));
+
+  // 1. Custom Security Headers Middleware to prevent Clickjacking, XSS, and MIME-sniffing
+  app.use((req, res, next) => {
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: blob:; connect-src 'self' https:; frame-ancestors 'self' https:;");
+    next();
+  });
+
+  // 2. Simple In-Memory Rate Limiter to protect all APIs from brute-forcing & crawling
+  const ipRequestCounts = new Map<string, { count: number; resetTime: number }>();
+  app.use('/api', (req, res, next) => {
+    const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const limitWindowMs = 60 * 1000; // 1 minute
+    const maxRequestsPerWindow = 120; // 120 requests maximum per minute
+
+    const clientData = ipRequestCounts.get(ip);
+    if (!clientData || now > clientData.resetTime) {
+      ipRequestCounts.set(ip, { count: 1, resetTime: now + limitWindowMs });
+      next();
+    } else {
+      clientData.count++;
+      if (clientData.count > maxRequestsPerWindow) {
+        return res.status(429).json({
+          error: 'Too many requests.',
+          message: 'IP rate limit exceeded. Action blocked to preserve server integrity.'
+        });
+      }
+      next();
+    }
+  });
+
+  // 3. User-Agent Bot & Automated Scraper Blocker
+  app.use('/api', (req, res, next) => {
+    const userAgent = req.headers['user-agent'] || '';
+    const lowUserAgent = userAgent.toLowerCase();
+    
+    const suspiciousBots = [
+      'puppeteer', 'selenium', 'playwright', 'headlesschrome',
+      'python-requests', 'beautifulsoup', 'urllib', 'curl', 'wget',
+      'scrapy', 'postmanruntime', 'insomnia', 'http-client', 'http_client'
+    ];
+
+    const isBot = suspiciousBots.some(bot => lowUserAgent.includes(bot));
+    if (isBot) {
+      console.warn(`[SECURITY SYSTEM] Headless bot/scraper blocked: ${userAgent}`);
+      return res.status(403).json({
+        error: 'Access Denied',
+        message: 'Direct API scraping is prohibited. Please use the authorized client user interface.'
+      });
+    }
+    next();
+  });
 
   // Seeding routine
   const seedDatabase = async () => {
@@ -31,8 +92,8 @@ async function startServer() {
       console.log("Checking database for seeding...");
 
       // 1. Translations
-      const transCount = await db.select().from(translations).limit(1);
-      if (transCount.length === 0) {
+      const existingTranslations = await db.select().from(translations);
+      if (existingTranslations.length === 0) {
         console.log("Seeding translations...");
         const vals: any[] = [];
         for (const lang of ['fr', 'ar'] as const) {
@@ -43,6 +104,23 @@ async function startServer() {
         // Insert in batches of 50 to avoid hitting limits
         for (let i = 0; i < vals.length; i += 50) {
           await db.insert(translations).values(vals.slice(i, i + 50));
+        }
+      } else {
+        // Dynamic sync: check if any new key from code needs seeding
+        const existingSet = new Set(existingTranslations.map(t => `${t.lang}:${t.key}`));
+        const missingVals: any[] = [];
+        for (const lang of ['fr', 'ar'] as const) {
+          for (const [key, val] of Object.entries(TRANSLATIONS[lang])) {
+            if (!existingSet.has(`${lang}:${key}`)) {
+              missingVals.push({ lang, key, value: val });
+            }
+          }
+        }
+        if (missingVals.length > 0) {
+          console.log(`Seeding ${missingVals.length} missing translation keys into DB...`);
+          for (let i = 0; i < missingVals.length; i += 50) {
+            await db.insert(translations).values(missingVals.slice(i, i + 50));
+          }
         }
       }
 
@@ -174,6 +252,35 @@ async function startServer() {
         await db.insert(budgetRecords).values(defaultBudgets);
       }
 
+      // 9. Default Managers
+      const mgrCount = await db.select().from(managersTable).limit(1);
+      if (mgrCount.length === 0) {
+        console.log("Seeding default managers...");
+        const defaultMgrs = [
+          {
+            id: "mgr_1",
+            username: "gestionnaire_budget",
+            password: "mru2026password",
+            name: "Responsable Budget & Financement",
+            role: "Gestionnaire Financier",
+            phone: "+222 45 67 89 01",
+            permissions: JSON.stringify(["budget_mru", "adherents"]),
+            createdAt: new Date().toLocaleDateString('fr-FR')
+          },
+          {
+            id: "mgr_2",
+            username: "responsable_kiffa",
+            password: "kiffa2026password",
+            name: "Délégué Régional Kiffa",
+            role: "Coordinateur Local",
+            phone: "+222 36 12 34 56",
+            permissions: JSON.stringify(["map_points", "adherents", "banner"]),
+            createdAt: new Date().toLocaleDateString('fr-FR')
+          }
+        ];
+        await db.insert(managersTable).values(defaultMgrs);
+      }
+
       console.log("Database seed check completed successfully.");
     } catch (err) {
       console.error("Error during database seeding:", err);
@@ -198,6 +305,11 @@ async function startServer() {
       const timeRows = await db.select().from(timelineEvents);
       const faqRows = await db.select().from(faqItems);
       const budRows = await db.select().from(budgetRecords);
+      const mgrRows = await db.select().from(managersTable);
+      const adhRows = await db.select().from(adherentsTable);
+      const annRows = await db.select().from(announcementsTable);
+      const pointRows = await db.select().from(interventionPointsTable);
+      const metaRows = await db.select().from(siteMetaTable);
 
       // Reconstruct translations
       const transObj: any = { fr: {}, ar: {} };
@@ -281,6 +393,67 @@ async function startServer() {
         spentMru: row.spentMru
       }));
 
+      // Reconstruct managers
+      const managersList = mgrRows.map(row => {
+        let perms: string[] = [];
+        try {
+          perms = row.permissions ? JSON.parse(row.permissions) : [];
+        } catch (e) {
+          perms = [];
+        }
+        return {
+          id: row.id,
+          username: row.username,
+          password: row.password,
+          name: row.name,
+          role: row.role,
+          phone: row.phone || '',
+          permissions: perms,
+          createdAt: row.createdAt || ''
+        };
+      });
+
+      // Reconstruct adherents
+      const adherentsList = adhRows.map(row => ({
+        id: row.id,
+        name: row.name,
+        nameAr: row.nameAr || row.name,
+        nameFr: row.nameFr || row.name,
+        phone: row.phone,
+        photo: row.photo,
+        city: row.city,
+        cityAr: row.cityAr || row.city,
+        cityFr: row.cityFr || row.city,
+        status: row.status as 'pending' | 'approved' | 'rejected',
+        createdAt: row.createdAt,
+        lang: row.lang as 'fr' | 'ar'
+      }));
+
+      // Reconstruct announcements
+      const announcementsList = annRows.map(row => ({
+        id: row.id,
+        text: { fr: row.textFr, ar: row.textAr },
+        isUrgent: row.isUrgent === 1
+      }));
+
+      // Reconstruct intervention points
+      const interventionPointsList = pointRows.map(row => ({
+        id: row.id,
+        category: row.category,
+        title: { fr: row.titleFr, ar: row.titleAr },
+        locationName: { fr: row.locationNameFr, ar: row.locationNameAr },
+        lat: parseFloat(row.lat) || 16.6215,
+        lng: parseFloat(row.lng) || -11.4120,
+        description: { fr: row.descFr, ar: row.descAr },
+        impactStats: { fr: row.impactStatsFr, ar: row.impactStatsAr },
+        status: row.status,
+        image: row.image
+      }));
+
+      // Reconstruct President Signature
+      const sigMeta = metaRows.find(m => m.key === 'presidentSignature');
+      const presidentSignature = sigMeta ? sigMeta.value : null;
+
       res.json({
         translations: transObj,
         images: imagesObj,
@@ -289,11 +462,147 @@ async function startServer() {
         galleryItems: galleryList,
         timelineEvents: timelineList,
         faqData: faqList,
-        budgetRecords: budgetList
+        budgetRecords: budgetList,
+        managers: managersList,
+        adherents: adherentsList,
+        announcements: announcementsList,
+        interventionPoints: interventionPointsList,
+        presidentSignature
       });
     } catch (err: any) {
       console.error("Failed to load site data from DB:", err);
       res.status(500).json({ error: "Failed to fetch site data", details: err.message });
+    }
+  });
+
+  // API - Managers CRUD
+  app.post('/api/managers', async (req, res) => {
+    try {
+      const { id, username, password, name, role, phone, permissions, createdAt } = req.body;
+      if (!id || !username || !password) {
+        return res.status(400).json({ error: "Missing required fields (id, username, password)" });
+      }
+      const mgrName = name || username;
+      const mgrRole = role || "Gestionnaire";
+      const permsStr = Array.isArray(permissions) ? JSON.stringify(permissions) : (permissions || '[]');
+      const existing = await db.select().from(managersTable).where(eq(managersTable.id, id));
+      if (existing.length > 0) {
+        await db.update(managersTable)
+          .set({ 
+            username, 
+            password, 
+            name: mgrName, 
+            role: mgrRole, 
+            phone: phone || '', 
+            permissions: permsStr, 
+            createdAt: createdAt || new Date().toLocaleDateString('fr-FR') 
+          })
+          .where(eq(managersTable.id, id));
+      } else {
+        await db.insert(managersTable).values({
+          id,
+          username,
+          password,
+          name: mgrName,
+          role: mgrRole,
+          phone: phone || '',
+          permissions: permsStr,
+          createdAt: createdAt || new Date().toLocaleDateString('fr-FR')
+        });
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error saving manager:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/managers/:id', async (req, res) => {
+    try {
+      await db.delete(managersTable).where(eq(managersTable.id, req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // API - Adherents CRUD
+  app.post('/api/adherents', async (req, res) => {
+    try {
+      const { id, name, nameAr, nameFr, phone, photo, city, cityAr, cityFr, status, createdAt, lang } = req.body;
+      if (!id || !name || !phone) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      const existing = await db.select().from(adherentsTable).where(eq(adherentsTable.id, id));
+      if (existing.length > 0) {
+        await db.update(adherentsTable)
+          .set({
+            name, nameAr: nameAr || name, nameFr: nameFr || name,
+            phone, photo: photo || '', city, cityAr: cityAr || city, cityFr: cityFr || city,
+            status: status || 'pending', createdAt: createdAt || new Date().toLocaleDateString(), lang: lang || 'ar'
+          })
+          .where(eq(adherentsTable.id, id));
+      } else {
+        await db.insert(adherentsTable).values({
+          id,
+          name,
+          nameAr: nameAr || name,
+          nameFr: nameFr || name,
+          phone,
+          photo: photo || '',
+          city,
+          cityAr: cityAr || city,
+          cityFr: cityFr || city,
+          status: status || 'pending',
+          createdAt: createdAt || new Date().toLocaleDateString(),
+          lang: lang || 'ar'
+        });
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/adherents/:id/status', async (req, res) => {
+    try {
+      const { status } = req.body;
+      await db.update(adherentsTable)
+        .set({ status })
+        .where(eq(adherentsTable.id, req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/adherents/:id', async (req, res) => {
+    try {
+      await db.delete(adherentsTable).where(eq(adherentsTable.id, req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // API - Site Meta
+  app.post('/api/site-meta', async (req, res) => {
+    try {
+      const { key, value } = req.body;
+      if (!key) return res.status(400).json({ error: "Missing key" });
+      if (value === null || value === undefined) {
+        await db.delete(siteMetaTable).where(eq(siteMetaTable.key, key));
+      } else {
+        const existing = await db.select().from(siteMetaTable).where(eq(siteMetaTable.key, key));
+        if (existing.length > 0) {
+          await db.update(siteMetaTable).set({ value }).where(eq(siteMetaTable.key, key));
+        } else {
+          await db.insert(siteMetaTable).values({ key, value });
+        }
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

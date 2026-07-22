@@ -4,7 +4,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Language, TranslationDict, ValueCard, CampaignItem, GalleryItem, TimelineEvent, FAQItem } from '../types';
+import { Language, TranslationDict, ValueCard, CampaignItem, GalleryItem, TimelineEvent, FAQItem, InterventionPoint, Adherent, Manager } from '../types';
 import { TRANSLATIONS, IMAGES, VALUE_CARDS, CAMPAIGNS_DATA, GALLERY_ITEMS, TIMELINE_EVENTS, FAQ_DATA } from '../data';
 import { auth, onAuthStateChanged, User, signOut } from '../lib/firebase-client.ts';
 
@@ -17,11 +17,24 @@ export interface BudgetRecord {
   spentMru: number;
 }
 
+export interface AnnouncementItem {
+  id: string;
+  text: { fr: string; ar: string };
+  isUrgent?: boolean;
+}
+
 interface EditableContextType {
   currentLang: Language;
   setLang: (lang: Language) => void;
   isAdminMode: boolean;
   setIsAdminMode: (val: boolean) => void;
+  isLoginModalOpen: boolean;
+  setIsLoginModalOpen: (val: boolean) => void;
+  loginModalType: 'admin' | 'manager' | null;
+  setLoginModalType: (val: 'admin' | 'manager' | null) => void;
+  isAdminPanelOpen: boolean;
+  setIsAdminPanelOpen: (val: boolean) => void;
+  handleSecretLogoClick: () => void;
   t: TranslationDict;
   user: User | null;
   logout: () => Promise<void>;
@@ -35,6 +48,8 @@ interface EditableContextType {
   timelineEvents: TimelineEvent[];
   faqData: FAQItem[];
   budgetRecords: BudgetRecord[];
+  announcements: AnnouncementItem[];
+  interventionPoints: InterventionPoint[];
 
   // CRUD functions for translations & main sections
   updateTranslation: (lang: Language, key: keyof TranslationDict, value: string) => Promise<void>;
@@ -70,6 +85,36 @@ interface EditableContextType {
   addBudgetRecord: (item: Omit<BudgetRecord, 'id'>) => Promise<void>;
   updateBudgetRecord: (id: string, item: BudgetRecord) => Promise<void>;
   deleteBudgetRecord: (id: string) => Promise<void>;
+
+  // CRUD for Ticker Announcements
+  addAnnouncement: (item: Omit<AnnouncementItem, 'id'>) => Promise<void>;
+  updateAnnouncement: (id: string, item: AnnouncementItem) => Promise<void>;
+  deleteAnnouncement: (id: string) => Promise<void>;
+
+  // CRUD for Intervention Points (Kiffa, Nouakchott, Nema, etc.)
+  addInterventionPoint: (item: Omit<InterventionPoint, 'id'>) => Promise<void>;
+  updateInterventionPoint: (id: string, item: InterventionPoint) => Promise<void>;
+  deleteInterventionPoint: (id: string) => Promise<void>;
+
+  // CRUD for Adherents
+  adherents: Adherent[];
+  addAdherent: (item: Omit<Adherent, 'id' | 'status' | 'createdAt'>) => Promise<string>;
+  updateAdherentStatus: (id: string, status: 'pending' | 'approved' | 'rejected') => Promise<void>;
+  deleteAdherent: (id: string) => Promise<void>;
+  updateAdherentPhoto: (id: string, base64: string) => Promise<void>;
+
+  // Manager and RBAC Authentication
+  managers: Manager[];
+  currentManager: Manager | null;
+  addManager: (item: Omit<Manager, 'id'>) => Promise<void>;
+  updateManager: (id: string, item: Manager) => Promise<void>;
+  deleteManager: (id: string) => Promise<void>;
+  loginManager: (username: string, password: string) => boolean;
+  logoutManager: () => void;
+
+  // Custom Signature
+  presidentSignature: string | null;
+  setPresidentSignature: (base64: string | null) => Promise<void>;
 }
 
 const EditableContext = createContext<EditableContextType | undefined>(undefined);
@@ -79,7 +124,33 @@ export const EditableProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return (localStorage.getItem('hassi_lang') as Language) || 'ar';
   });
   const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  const [loginModalType, setLoginModalType] = useState<'admin' | 'manager' | null>(null);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
   const [user, setUser] = useState<User | null>(null);
+
+  const logoClickRef = React.useRef<{ count: number; lastTime: number }>({ count: 0, lastTime: 0 });
+
+  const handleSecretLogoClick = () => {
+    const now = Date.now();
+    if (now - logoClickRef.current.lastTime > 2500) {
+      logoClickRef.current.count = 1;
+    } else {
+      logoClickRef.current.count += 1;
+    }
+    logoClickRef.current.lastTime = now;
+
+    if (logoClickRef.current.count >= 5) {
+      logoClickRef.current.count = 0;
+      if (auth.currentUser || isAdminMode) {
+        setIsAdminMode(true);
+        setIsAdminPanelOpen(true);
+      } else {
+        setLoginModalType('admin');
+        setIsLoginModalOpen(true);
+      }
+    }
+  };
 
   // Base database states (initially with default fallback data)
   const [translations, setTranslations] = useState<Record<'fr' | 'ar', TranslationDict>>(TRANSLATIONS);
@@ -122,6 +193,333 @@ export const EditableProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   ];
   const [budgetRecords, setBudgetRecords] = useState<BudgetRecord[]>(DEFAULT_BUDGET_RECORDS);
 
+  const DEFAULT_ANNOUNCEMENTS: AnnouncementItem[] = [
+    {
+      id: "ann_1",
+      text: {
+        fr: "🚨 URGENCE EAU POTABLE: Distribution gratuite par citernes aujourd'hui dans les quartiers de Hassi El Bekay et Soukeina (Kiffa).",
+        ar: "🚨 عاجل - طوارئ المياه: توزيع مجاني للمياه الصالحة للشرب عبر الصهاريج اليوم في حسي البكاي وحي سكينه ببلدية كيفه."
+      },
+      isUrgent: true
+    },
+    {
+      id: "ann_2",
+      text: {
+        fr: "📢 ASSEMBLÉE CITOYENNE: Réunion générale ce vendredi à 16h00 au siège du mouvement Amel Hassi El Bkay.",
+        ar: "📢 اجتماع جماهيري: جمعية عامة يوم الجمعة المقبل الساعة 16:00 بمقر حركة أمل حسي البكاي."
+      },
+      isUrgent: false
+    },
+    {
+      id: "ann_3",
+      text: {
+        fr: "💧 NOUVEAU FORAGE: Finalisation des travaux du 3ème forage au niveau de la commune de Kiffa.",
+        ar: "💧 إنجاز جديد: اكتمال أعمال الحفر في البئر الارتوازية الثالثة لدعم الساكنة بكيفه."
+      },
+      isUrgent: false
+    },
+    {
+      id: "ann_4",
+      text: {
+        fr: "🤝 CARAVANE DE SANTÉ: Consultation médicale gratuite et distribution de médicaments les 25 et 26 juillet.",
+        ar: "🤝 قافلة طبية: استشارات طبية مجانية وتوزيع الأدوية يومي 25 و26 يوليوز."
+      },
+      isUrgent: false
+    }
+  ];
+
+  const [announcements, setAnnouncements] = useState<AnnouncementItem[]>(() => {
+    const saved = localStorage.getItem('hassi_announcements');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return DEFAULT_ANNOUNCEMENTS;
+      }
+    }
+    return DEFAULT_ANNOUNCEMENTS;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('hassi_announcements', JSON.stringify(announcements));
+  }, [announcements]);
+
+  const DEFAULT_INTERVENTION_POINTS: InterventionPoint[] = [
+    {
+      id: 'point_hq_bekay',
+      category: 'hq',
+      title: {
+        fr: "Siège Central & Forages Hassi El Bekay (Kiffa)",
+        ar: "المقر الرئيسي وآبار حسي البكاي المركزية (كيفه)"
+      },
+      locationName: {
+        fr: "Hassi El Bekay, Commune de Kiffa",
+        ar: "حسي البكاي، بلدية كيفه"
+      },
+      lat: 16.6215,
+      lng: -11.4120,
+      description: {
+        fr: "Point névralgique du mouvement à Kiffa. Abrite le quartier général, 3 forages modernes équipés en solaire et la station de remplissage des citernes gratuites.",
+        ar: "المركز الرئيسي للحركة بكيفه، ويضم المقر العام و3 آبار ارتوازية حديثة تعمل بالطاقة الشمسية مع محطة تعبئة الصهاريج المجانية."
+      },
+      impactStats: {
+        fr: "3 Forages Solaire • 800m³ d'eau potable/jour",
+        ar: "3 آبار شمسية • 800 متر مكعب مياه يومياً"
+      },
+      status: 'active',
+      image: 'https://images.unsplash.com/photo-1541888946425-d0fbb186a5b7?auto=format&fit=crop&w=800&q=80'
+    },
+    {
+      id: 'point_kiffa_centre',
+      category: 'water',
+      title: {
+        fr: "Centre de Distribution Kiffa Ville",
+        ar: "مركز توزيع وتواصل كيفه المدينة"
+      },
+      locationName: {
+        fr: "Centre-Ville Kiffa (près du Marché)",
+        ar: "وسط مدينة كيفه (قرب السوق)"
+      },
+      lat: 16.6167,
+      lng: -11.4000,
+      description: {
+        fr: "Permanence citoyenne de réception des requêtes en eau potable et coordination des caravanes d'urgence pour les quartiers assoiffés de Kiffa.",
+        ar: "مكتب التنسيق والاستقبال الشعبي لتلقي طلبات المياه وتوجيه صهاريج الإغاثة للأحياء الأكثر احتياجاً بكيفه."
+      },
+      impactStats: {
+        fr: "Plus de 12 000 Citoyens assistés",
+        ar: "أكثر من 12,000 مواطن مستفيد"
+      },
+      status: 'active',
+      image: 'https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?auto=format&fit=crop&w=800&q=80'
+    },
+    {
+      id: 'point_nouakchott_hq',
+      category: 'hq',
+      title: {
+        fr: "Bureau de Coordination & Cadres (Nouakchott)",
+        ar: "مكتب التنسيق الدائم والروابط الشعبية (نواكشوط)"
+      },
+      locationName: {
+        fr: "Tevragh-Zeina / Ksar, Nouakchott",
+        ar: "تفرغ زينه / القصر، نواكشوط"
+      },
+      lat: 18.0866,
+      lng: -15.9785,
+      description: {
+        fr: "Antenne de rassemblement des cadres, étudiants et ressortissants de Hassi El Bekay résidant à Nouakchott pour le pilotage stratégique et la mobilisation des ressources.",
+        ar: "مكتب التنسيق والتواصل الاجتماعي لأطر وأبناء حسي البكاي بنواكشوط لحشد الموارد وتوجيه الدعم للتنمية المحلية بكيفه والشرق."
+      },
+      impactStats: {
+        fr: "Plus de 350 Cadres & Membres actifs",
+        ar: "تعبئة أكثر من 350 إطاراً وعضواً نشطاً"
+      },
+      status: 'active',
+      image: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=800&q=80'
+    },
+    {
+      id: 'point_nema_hub',
+      category: 'social',
+      title: {
+        fr: "Pôle d'Ancrage & Solidarité Est (Nema)",
+        ar: "مركز التواجد والتضامن الاجتماعي بالشرق (النعمة)"
+      },
+      locationName: {
+        fr: "Centre-Ville Nema, Hodh Ech Chargui",
+        ar: "وسط مدينة النعمة، الحوض الشرقي"
+      },
+      lat: 16.6133,
+      lng: -7.2533,
+      description: {
+        fr: "Point de liaison et d'entraide citoyenne reliant les actions du mouvement Amel Hassi El Bekay entre l'Assaba et les wilayas du Hodh.",
+        ar: "نقطة الارتباط والتضامن الشعبي لربط مبادرات الحركة بين ولاية العصابة والحوضين."
+      },
+      impactStats: {
+        fr: "Relais régional d'entraide communautaire",
+        ar: "شبكة تضامن إقليمية واسعة"
+      },
+      status: 'active',
+      image: 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80'
+    },
+    {
+      id: 'point_soukeina',
+      category: 'social',
+      title: {
+        fr: "Station Citerne Soukeina & Douyez (Kiffa)",
+        ar: "محطة الصهاريج بحي سكينه والدويز (كيفه)"
+      },
+      locationName: {
+        fr: "Quartier Soukeina, Kiffa",
+        ar: "حي سكينه، كيفه"
+      },
+      lat: 16.6080,
+      lng: -11.3910,
+      description: {
+        fr: "Point d'eau communautaire permanent approvisionné quotidiennement par les camions-citernes de l'initiative Hassi El Bkay.",
+        ar: "نقطة مياه مجتمعية دائمة يتم تزويها يومياً بصهاريج المياه الصالحة للشرب التابعة للحركة."
+      },
+      impactStats: {
+        fr: "450 Familles desservies / jour",
+        ar: "450 أسرة تستفيد يومياً"
+      },
+      status: 'active',
+      image: 'https://images.unsplash.com/photo-1509099836639-18ba1795216d?auto=format&fit=crop&w=800&q=80'
+    },
+    {
+      id: 'point_sagatar',
+      category: 'youth',
+      title: {
+        fr: "Espace Jeunesse & Soutien Sagatar (Kiffa)",
+        ar: "مركز الشباب والدعم بسقاطار (كيفه)"
+      },
+      locationName: {
+        fr: "Secteur Sagatar Nord, Kiffa",
+        ar: "قطاع سقاطار الشمالي، كيفه"
+      },
+      lat: 16.6310,
+      lng: -11.4050,
+      description: {
+        fr: "Distribution annuelle de fournitures scolaires, parrainage d'élèves démunis et organisation de tournois sportifs de la jeunesse.",
+        ar: "توزيع الأدوات المدرسية السنوية وكفالة التلاميذ المتعثرين وتنظيم البطولات الرياضية الشبابية."
+      },
+      impactStats: {
+        fr: "150 Élèves parrainés & Kits scolaires",
+        ar: "كفالة 150 تلميذاً وتوزيع الحقائب المدرسية"
+      },
+      status: 'active',
+      image: 'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=800&q=80'
+    },
+    {
+      id: 'point_khedim',
+      category: 'health',
+      title: {
+        fr: "Poste Médical Mobile El Khedim (Kiffa)",
+        ar: "المركز الطبي السَيّار بالخديم (كيفه)"
+      },
+      locationName: {
+        fr: "Zone El Khedim, Kiffa",
+        ar: "منطقة الخديم، كيفه"
+      },
+      lat: 16.6020,
+      lng: -11.4180,
+      description: {
+        fr: "Consultations médicales bénévoles avec médecins partenaires et distribution gratuite de médicaments essentiels.",
+        ar: "استشارات طبية تطوعية مع أطباء شركاء وتوزيع مجاني للأدوية الأساسية للساكنة."
+      },
+      impactStats: {
+        fr: "2 Caravanes de santé mensuelles",
+        ar: "قافلتان طبيتان كل شهر"
+      },
+      status: 'in_progress',
+      image: 'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&w=800&q=80'
+    }
+  ];
+
+  const [interventionPoints, setInterventionPoints] = useState<InterventionPoint[]>(() => {
+    const saved = localStorage.getItem('hassi_intervention_points');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return DEFAULT_INTERVENTION_POINTS;
+      }
+    }
+    return DEFAULT_INTERVENTION_POINTS;
+  });
+
+  const DEFAULT_ADHERENTS: Adherent[] = [
+    {
+      id: "AMEL-2026-3847",
+      name: "Ahmed Ould Mohamed El Moctar",
+      phone: "+222 4655 4433",
+      photo: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&h=150&q=80",
+      city: "Kiffa",
+      status: "approved",
+      createdAt: "18/07/2026",
+      lang: "ar"
+    },
+    {
+      id: "AMEL-2026-9281",
+      name: "Mariem Mint Alassane",
+      phone: "+222 3611 2299",
+      photo: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&h=150&q=80",
+      city: "Nouakchott",
+      status: "approved",
+      createdAt: "19/07/2026",
+      lang: "fr"
+    },
+    {
+      id: "AMEL-2026-1049",
+      name: "Sidi Ould Cheikh",
+      phone: "+222 2244 5566",
+      photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&h=150&q=80",
+      city: "Nema",
+      status: "pending",
+      createdAt: "22/07/2026",
+      lang: "fr"
+    }
+  ];
+
+  const [adherents, setAdherents] = useState<Adherent[]>(() => {
+    const saved = localStorage.getItem('hassi_adherents');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return DEFAULT_ADHERENTS;
+      }
+    }
+    return DEFAULT_ADHERENTS;
+  });
+
+  const [managers, setManagers] = useState<Manager[]>(() => {
+    const saved = localStorage.getItem('hassi_managers');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const [currentManager, setCurrentManager] = useState<Manager | null>(() => {
+    const saved = localStorage.getItem('hassi_current_manager');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  const [presidentSignature, setPresidentSignatureState] = useState<string | null>(() => {
+    return localStorage.getItem('hassi_president_signature') || null;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('hassi_managers', JSON.stringify(managers));
+  }, [managers]);
+
+  useEffect(() => {
+    if (currentManager) {
+      localStorage.setItem('hassi_current_manager', JSON.stringify(currentManager));
+    } else {
+      localStorage.removeItem('hassi_current_manager');
+    }
+  }, [currentManager]);
+
+  useEffect(() => {
+    localStorage.setItem('hassi_adherents', JSON.stringify(adherents));
+  }, [adherents]);
+
+  useEffect(() => {
+    localStorage.setItem('hassi_intervention_points', JSON.stringify(interventionPoints));
+  }, [interventionPoints]);
+
   // Sync lang preference locally
   useEffect(() => {
     localStorage.setItem('hassi_lang', currentLang);
@@ -152,6 +550,11 @@ export const EditableProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (data.timelineEvents) setTimelineEvents(data.timelineEvents);
           if (data.faqData) setFaqData(data.faqData);
           if (data.budgetRecords) setBudgetRecords(data.budgetRecords);
+          if (data.managers && Array.isArray(data.managers)) setManagers(data.managers);
+          if (data.adherents && Array.isArray(data.adherents)) setAdherents(data.adherents);
+          if (data.announcements && Array.isArray(data.announcements)) setAnnouncements(data.announcements);
+          if (data.interventionPoints && Array.isArray(data.interventionPoints)) setInterventionPoints(data.interventionPoints);
+          if (data.presidentSignature !== undefined) setPresidentSignatureState(data.presidentSignature);
         }
       } catch (err) {
         console.error('Error loading site data from database:', err);
@@ -174,6 +577,94 @@ export const EditableProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const logout = async () => {
     await signOut(auth);
     setIsAdminMode(false);
+    setCurrentManager(null);
+    setIsAdminPanelOpen(false);
+    localStorage.removeItem('hassi_current_manager');
+  };
+
+  const addManager = async (item: Omit<Manager, 'id'>) => {
+    const id = `mgr_${Date.now()}`;
+    const newMgr: Manager = {
+      ...item,
+      id,
+      name: item.name || item.username,
+      role: item.role || 'Gestionnaire',
+      phone: item.phone || '',
+      createdAt: item.createdAt || new Date().toLocaleDateString('fr-FR')
+    };
+    setManagers(prev => [...prev, newMgr]);
+    try {
+      await fetch('/api/managers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMgr)
+      });
+    } catch (err) {
+      console.error('Error saving manager to database:', err);
+    }
+  };
+
+  const updateManager = async (id: string, item: Manager) => {
+    setManagers(prev => prev.map(m => m.id === id ? item : m));
+    if (currentManager && currentManager.id === id) {
+      setCurrentManager(item);
+    }
+    try {
+      await fetch('/api/managers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item)
+      });
+    } catch (err) {
+      console.error('Error updating manager in database:', err);
+    }
+  };
+
+  const deleteManager = async (id: string) => {
+    setManagers(prev => prev.filter(m => m.id !== id));
+    if (currentManager && currentManager.id === id) {
+      setCurrentManager(null);
+    }
+    try {
+      await fetch(`/api/managers/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.error('Error deleting manager from database:', err);
+    }
+  };
+
+  const loginManager = (username: string, password: string): boolean => {
+    const m = managers.find(x => x.username.toLowerCase() === username.toLowerCase() && x.password === password);
+    if (m) {
+      setCurrentManager(m);
+      setIsAdminMode(false);
+      return true;
+    }
+    return false;
+  };
+
+  const logoutManager = () => {
+    setCurrentManager(null);
+    localStorage.removeItem('hassi_current_manager');
+  };
+
+  const setPresidentSignature = async (base64: string | null) => {
+    setPresidentSignatureState(base64);
+    if (base64) {
+      localStorage.setItem('hassi_president_signature', base64);
+    } else {
+      localStorage.removeItem('hassi_president_signature');
+    }
+    try {
+      await fetch('/api/site-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'presidentSignature', value: base64 })
+      });
+    } catch (err) {
+      console.error('Error saving signature to database:', err);
+    }
   };
 
   // Sync state functions
@@ -609,6 +1100,101 @@ export const EditableProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const addAnnouncement = async (item: Omit<AnnouncementItem, 'id'>) => {
+    const newAnn: AnnouncementItem = {
+      ...item,
+      id: `ann_${Date.now()}`
+    };
+    setAnnouncements(prev => [...prev, newAnn]);
+  };
+
+  const updateAnnouncement = async (id: string, item: AnnouncementItem) => {
+    setAnnouncements(prev => prev.map(a => a.id === id ? item : a));
+  };
+
+  const deleteAnnouncement = async (id: string) => {
+    setAnnouncements(prev => prev.filter(a => a.id !== id));
+  };
+
+  // CRUD Intervention Points
+  const addInterventionPoint = async (item: Omit<InterventionPoint, 'id'>) => {
+    const newPoint: InterventionPoint = {
+      ...item,
+      id: `point_${Date.now()}`
+    };
+    setInterventionPoints(prev => [...prev, newPoint]);
+  };
+
+  const updateInterventionPoint = async (id: string, item: InterventionPoint) => {
+    setInterventionPoints(prev => prev.map(p => p.id === id ? item : p));
+  };
+
+  const deleteInterventionPoint = async (id: string) => {
+    setInterventionPoints(prev => prev.filter(p => p.id !== id));
+  };
+
+  const addAdherent = async (item: Omit<Adherent, 'id' | 'status' | 'createdAt'>) => {
+    const randomNum = Math.floor(1000 + Math.random() * 9000);
+    const id = `AMEL-2026-${randomNum}`;
+    const newAdherent: Adherent = {
+      ...item,
+      id,
+      status: 'pending',
+      createdAt: new Date().toLocaleDateString('fr-FR'),
+    };
+    setAdherents(prev => [newAdherent, ...prev]);
+    try {
+      await fetch('/api/adherents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAdherent)
+      });
+    } catch (err) {
+      console.error('Error saving adherent to database:', err);
+    }
+    return id;
+  };
+
+  const updateAdherentStatus = async (id: string, status: 'pending' | 'approved' | 'rejected') => {
+    setAdherents(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+    try {
+      await fetch(`/api/adherents/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+    } catch (err) {
+      console.error('Error updating adherent status in database:', err);
+    }
+  };
+
+  const deleteAdherent = async (id: string) => {
+    setAdherents(prev => prev.filter(a => a.id !== id));
+    try {
+      await fetch(`/api/adherents/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.error('Error deleting adherent from database:', err);
+    }
+  };
+
+  const updateAdherentPhoto = async (id: string, base64: string) => {
+    setAdherents(prev => prev.map(a => a.id === id ? { ...a, photo: base64 } : a));
+    const found = adherents.find(a => a.id === id);
+    if (found) {
+      try {
+        await fetch('/api/adherents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...found, photo: base64 })
+        });
+      } catch (err) {
+        console.error('Error updating adherent photo in database:', err);
+      }
+    }
+  };
+
   const t = translations[currentLang];
 
   return (
@@ -617,6 +1203,13 @@ export const EditableProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setLang,
       isAdminMode,
       setIsAdminMode,
+      isLoginModalOpen,
+      setIsLoginModalOpen,
+      loginModalType,
+      setLoginModalType,
+      isAdminPanelOpen,
+      setIsAdminPanelOpen,
+      handleSecretLogoClick,
       translations,
       t,
       images,
@@ -626,6 +1219,9 @@ export const EditableProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       timelineEvents,
       faqData,
       budgetRecords,
+      announcements,
+      interventionPoints,
+      adherents,
       user,
       logout,
 
@@ -655,7 +1251,30 @@ export const EditableProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       addBudgetRecord,
       updateBudgetRecord,
-      deleteBudgetRecord
+      deleteBudgetRecord,
+
+      addAnnouncement,
+      updateAnnouncement,
+      deleteAnnouncement,
+
+      addInterventionPoint,
+      updateInterventionPoint,
+      deleteInterventionPoint,
+
+      addAdherent,
+      updateAdherentStatus,
+      deleteAdherent,
+      updateAdherentPhoto,
+
+      managers,
+      currentManager,
+      addManager,
+      updateManager,
+      deleteManager,
+      loginManager,
+      logoutManager,
+      presidentSignature,
+      setPresidentSignature
     }}>
       {children}
     </EditableContext.Provider>

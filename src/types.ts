@@ -6,6 +6,7 @@
 export type Language = 'fr' | 'ar';
 
 export interface TranslationDict {
+  [key: string]: string;
   navHome: string;
   navValues: string;
   navCampaigns: string;
@@ -47,6 +48,10 @@ export interface TranslationDict {
 
   faqTitle: string;
   faqSubtitle: string;
+
+  mapBadge: string;
+  mapTitle: string;
+  mapSubtitle: string;
 
   contactTitle: string;
   contactSubtitle: string;
@@ -125,3 +130,44 @@ export interface FAQItem {
   question: { fr: string; ar: string };
   answer: { fr: string; ar: string };
 }
+
+export interface InterventionPoint {
+  id: string;
+  category: 'water' | 'health' | 'youth' | 'hq' | 'social';
+  title: { fr: string; ar: string };
+  locationName: { fr: string; ar: string };
+  lat: number;
+  lng: number;
+  description: { fr: string; ar: string };
+  impactStats: { fr: string; ar: string };
+  status: 'active' | 'in_progress' | 'planned';
+  image: string;
+}
+
+export interface Adherent {
+  id: string;
+  name: string;
+  nameAr?: string;
+  nameFr?: string;
+  phone: string;
+  photo: string; // Base64 or standard URL
+  city: string;
+  cityAr?: string;
+  cityFr?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  lang: 'fr' | 'ar';
+}
+
+export interface Manager {
+  id: string;
+  username: string;
+  password?: string;
+  name?: string;
+  role?: string;
+  phone?: string;
+  createdAt?: string;
+  permissions: string[]; // e.g. ['nav_hero', 'banner', 'sections', 'map_points', 'footer_seo', 'images', 'budget_mru', 'adherents']
+}
+
+

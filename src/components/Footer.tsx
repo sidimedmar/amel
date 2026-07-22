@@ -7,9 +7,10 @@ import React from 'react';
 import { ArrowUp, Facebook, Phone, Mail, MapPin, Globe } from 'lucide-react';
 import { useEditable } from '../context/EditableContext';
 import { Logo } from './Logo';
+import { VisitorCounter } from './VisitorCounter';
 
 export const Footer: React.FC = () => {
-  const { currentLang, t } = useEditable();
+  const { currentLang, t, handleSecretLogoClick } = useEditable();
 
   const handleScrollToTop = () => {
     window.scrollTo({
@@ -45,7 +46,11 @@ export const Footer: React.FC = () => {
           
           {/* Column 1: Brand details */}
           <div className="md:col-span-5 flex flex-col items-start text-left rtl:text-right">
-            <Logo className="w-16 h-16 bg-white/5 p-2 rounded-xl mb-6 border border-white/10" showText={true} />
+            <Logo 
+              className="w-16 h-16 bg-white/5 p-2 rounded-xl mb-6 border border-white/10 cursor-pointer" 
+              showText={true} 
+              onClick={handleSecretLogoClick}
+            />
             <p className="text-sm text-slate-400 leading-relaxed max-w-sm mb-6 font-normal">
               {t.footerText}
             </p>
@@ -75,7 +80,7 @@ export const Footer: React.FC = () => {
           {/* Column 2: Navigation Links */}
           <div className="md:col-span-3 text-left rtl:text-right">
             <h4 className="text-sm font-bold uppercase tracking-wider text-white border-l-2 rtl:border-l-0 rtl:border-r-2 border-amber-500 pl-3 rtl:pr-3 mb-6">
-              {currentLang === 'fr' ? "Raccourcis" : "روابط سريعة"}
+              {t.footerShortcutsHeading || (currentLang === 'fr' ? "Raccourcis" : "روابط سريعة")}
             </h4>
             <ul className="space-y-3.5 text-sm font-medium">
               {[
@@ -102,28 +107,40 @@ export const Footer: React.FC = () => {
           {/* Column 3: Contact & Leadership coordinates */}
           <div className="md:col-span-4 text-left rtl:text-right">
             <h4 className="text-sm font-bold uppercase tracking-wider text-white border-l-2 rtl:border-l-0 rtl:border-r-2 border-amber-500 pl-3 rtl:pr-3 mb-6">
-              {currentLang === 'fr' ? "Coordonnées de l'Initiative" : "معلومات الاتصال"}
+              {t.footerContactHeading || (currentLang === 'fr' ? "Coordonnées de l'Initiative" : "معلومات الاتصال")}
             </h4>
             <ul className="space-y-4 text-sm">
               <li className="flex items-start gap-3">
                 <Phone className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-bold text-white text-xs uppercase tracking-wider">WhatsApp & Appel</p>
-                  <p className="text-slate-400 mt-0.5">+222 4673 3465</p>
+                  <p className="font-bold text-white text-xs uppercase tracking-wider">
+                    {t.footerPhoneLabel || "WhatsApp & Appel"}
+                  </p>
+                  <p className="text-slate-400 mt-0.5">
+                    {t.footerPhoneVal || "+222 4673 3465"}
+                  </p>
                 </div>
               </li>
               <li className="flex items-start gap-3">
                 <Mail className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-bold text-white text-xs uppercase tracking-wider">Adresse Email</p>
-                  <p className="text-slate-400 mt-0.5">contact@hassi-elbkay.org</p>
+                  <p className="font-bold text-white text-xs uppercase tracking-wider">
+                    {t.footerEmailLabel || "Adresse Email"}
+                  </p>
+                  <p className="text-slate-400 mt-0.5">
+                    {t.footerEmailVal || "contact@hassi-elbkay.org"}
+                  </p>
                 </div>
               </li>
               <li className="flex items-start gap-3">
                 <MapPin className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-bold text-white text-xs uppercase tracking-wider">Quartier Général</p>
-                  <p className="text-slate-400 mt-0.5">Hassi El Bekay, Commune de Kiffa, Mauritanie</p>
+                  <p className="font-bold text-white text-xs uppercase tracking-wider">
+                    {t.footerAddressLabel || "Quartier Général"}
+                  </p>
+                  <p className="text-slate-400 mt-0.5">
+                    {t.footerAddressVal || "Hassi El Bekay, Commune de Kiffa, Mauritanie"}
+                  </p>
                 </div>
               </li>
             </ul>
@@ -131,6 +148,9 @@ export const Footer: React.FC = () => {
 
         </div>
       </div>
+
+      {/* Visitor Counter Section displaying movement popularity in Kiffa */}
+      <VisitorCounter />
 
       {/* SEO metadata tags representation (Under footer, readable by search crawlers) */}
       <div className="bg-slate-950 py-4 border-t border-slate-800/60">

@@ -9,7 +9,7 @@ import { useEditable } from '../context/EditableContext';
 import { Logo } from './Logo';
 
 export const Hero: React.FC = () => {
-  const { t, images, currentLang } = useEditable();
+  const { t, images, currentLang, translations } = useEditable();
 
   const handleScrollTo = (id: string) => {
     const element = document.querySelector(id);
@@ -147,17 +147,16 @@ export const Hero: React.FC = () => {
               </div>
             </div>
 
-            {/* Floating decoration widget: Action Highlights */}
+            {/* Floating decoration widget: Movement Badge on Photo */}
             <div className="absolute -bottom-6 -left-6 bg-white dark:bg-slate-900 p-4 rounded-xl shadow-xl border border-slate-100 dark:border-slate-800 flex items-center gap-3 animate-bounce-slow max-w-xs">
-              <div className="bg-amber-100 dark:bg-amber-950/50 p-2.5 rounded-lg text-amber-600 dark:text-amber-400">
-                <Droplets className="w-6 h-6 animate-pulse" />
+              <div className="bg-amber-100 dark:bg-amber-950/50 p-2.5 rounded-lg text-amber-600 dark:text-amber-400 shrink-0">
+                <ShieldCheck className="w-6 h-6 text-amber-500" />
               </div>
               <div className="text-left rtl:text-right">
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
-                  {currentLang === 'fr' ? "Urgence Eau" : "سقاية مستعجلة"}
-                </p>
-                <p className="text-sm font-extrabold text-slate-800 dark:text-white leading-tight">
-                  {currentLang === 'fr' ? "Citernes Actives" : "تسيير صهاريج المياه"}
+                <p className="text-xs sm:text-sm font-black text-slate-800 dark:text-white leading-snug">
+                  {currentLang === 'fr' 
+                    ? (translations?.fr?.heroPhotoBadgeFr || t.heroPhotoBadgeFr || "Mouvement Social & Politique à Kiffa") 
+                    : (translations?.ar?.heroPhotoBadgeAr || t.heroPhotoBadgeAr || "حراك اجتماعي وسياسي بكيفه")}
                 </p>
               </div>
             </div>
